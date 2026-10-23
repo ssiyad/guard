@@ -234,6 +234,15 @@ class TestPipeline(PullRequestCase):
 		frappe.db.set_value("Code Repository", self.repository, "reviews_enabled", 0)
 		self.assertIsNone(trigger.consider(self.pr, "open"))
 
+	def test_skipped_review_marks_the_commit(self):
+		frappe.db.set_value("Pull Request", self.pr, "is_draft", 1)
+		self.assertIsNone(trigger.consider(self.pr, "open"))
+		self.assertEqual(self.adapter.named("status"), ["skipped"])
+		# A repository without reviews gets no check.
+		frappe.db.set_value("Code Repository", self.repository, "reviews_enabled", 0)
+		self.assertIsNone(trigger.consider(self.pr, "open"))
+		self.assertEqual(self.adapter.named("status"), ["skipped"])
+
 	def test_skip_authors_from_review_settings(self):
 		settings = frappe.get_doc("Review Settings", "Organization")
 		settings.set("exclude_authors", "mergify[bot]\nad*")
