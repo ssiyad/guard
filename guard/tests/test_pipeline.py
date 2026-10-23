@@ -3,7 +3,7 @@ from unittest.mock import PropertyMock, patch
 import frappe
 
 from guard.llm.client import LLMClient, use_responder
-from guard.providers.base import ProviderComment
+from guard.providers.base import ProviderComment, ProviderError
 from guard.review import trigger
 from guard.tests.cases import AUTO_APPROVE, PullRequestCase
 from guard.tests.fakes import scripted
@@ -113,6 +113,15 @@ class TestPipeline(PullRequestCase):
 		name = self.review([])
 		self.assertEqual(self.row(name)["status"], "Skipped")
 		self.assertEqual(self.adapter.named("status"), ["pending", "skipped"])
+
+	def test_failed_review_closes_the_check_when_the_reaction_fails(self):
+		with (
+			patch("guard.review.pipeline.ensure_fresh", side_effect=RuntimeError("index broke")),
+			patch.object(self.adapter, "add_reaction", side_effect=ProviderError("no reactions")),
+			self.assertRaises(RuntimeError),
+		):
+			self.review([])
+		self.assertEqual(self.adapter.named("status"), ["pending", "error"])
 
 	def test_rereview_edits_summary_and_dedupes(self):
 		finding = {
