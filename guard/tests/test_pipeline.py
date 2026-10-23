@@ -99,6 +99,15 @@ class TestPipeline(PullRequestCase):
 		self.assertEqual(self.adapter.named("status"), ["error"])
 		self.assertIn("confused", self.adapter.named("react"))
 
+	def test_cancelled_review_closes_the_check(self):
+		def cancel(repository):
+			frappe.db.set_value("Code Review", {"pull_request": self.pr}, "cancel_requested", 1)
+
+		with patch("guard.review.pipeline.ensure_fresh", side_effect=cancel):
+			name = self.review([])
+		self.assertEqual(self.row(name)["status"], "Cancelled")
+		self.assertEqual(self.adapter.named("status"), ["pending", "cancelled"])
+
 	def test_rereview_edits_summary_and_dedupes(self):
 		finding = {
 			"path": "app/models.py",
