@@ -245,6 +245,7 @@ class ReviewPipeline:
 			self.review.db_set(
 				{"status": "Skipped", "error": "no reviewable files", "completed_at": now_datetime()}
 			)
+			Publisher(run).skip("no reviewable files")
 			return None
 		return run
 

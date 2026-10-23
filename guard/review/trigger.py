@@ -13,6 +13,7 @@ from guard.guard.doctype.review_settings.review_settings import get_effective
 from guard.providers import adapter_for_repository
 from guard.review import permissions
 from guard.review.jobs import create_review
+from guard.review.publish import report_skip
 from guard.utils import db
 
 if TYPE_CHECKING:
@@ -63,6 +64,8 @@ def consider(
 	result = gate.check(facts, config, event, manual, rules)
 	if not result.allowed:
 		frappe.logger("guard").info(f"review skipped for {pull_request}: {result.reason}")
+		if adapter and config.settings.get("status_check", True):
+			report_skip(adapter, str(repo.get("full_name")), head, result.reason)
 		return None
 	trigger = event if not manual else ("retrigger" if event == "retrigger" else "mention")
 	user = permissions.user_for_login(requested_by) if requested_by else None
