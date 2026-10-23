@@ -169,13 +169,18 @@ class Publisher:
 			return sum(1 for f in self.run.findings if f.kept)
 		return open_finding_count(str(self.run.review.pull_request))
 
+	def skip(self, reason: str) -> None:
+		if self._shows_check():
+			report_skip(self.gh, self.repo, self.run.head_sha, reason, self._url())
+
+	def _shows_check(self) -> bool:
+		return bool(self.adapter and self.run.pr is not None and self.run.settings.get("status_check", True))
+
 	def _status(self, state: str, text: str) -> None:
-		try:
-			self.gh.set_status(
-				self.repo, self.run.head_sha, state, text, links.code_review(str(self.run.review.name))
-			)
-		except ProviderError as error:
-			frappe.log_error(str(error), "Guard status")
+		set_status(self.gh, self.repo, self.run.head_sha, state, text, self._url())
+
+	def _url(self) -> str:
+		return links.code_review(str(self.run.review.name))
 
 	def _react(self, content: str) -> None:
 		try:
@@ -197,6 +202,19 @@ class Publisher:
 
 	def _reaction_key(self, content: str) -> str:
 		return f"guard:reaction:{self.repo}:{self.number}:{content}"
+
+
+def set_status(adapter: ProviderAdapter, repo: str, sha: str, state: str, text: str, url: str = "") -> None:
+	"""Set the Guard check. A provider error is only logged."""
+	try:
+		adapter.set_status(repo, sha, state, text, url)
+	except ProviderError as error:
+		frappe.log_error(str(error), "Guard status")
+
+
+def report_skip(adapter: ProviderAdapter, repo: str, sha: str, reason: str, url: str = "") -> None:
+	"""Show on the commit that Guard will not review it, so nobody waits for a review."""
+	set_status(adapter, repo, sha, "skipped", f"Guard skipped this review: {reason}", url)
 
 
 def open_finding_count(pull_request: str) -> int:
