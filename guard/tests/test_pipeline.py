@@ -108,6 +108,12 @@ class TestPipeline(PullRequestCase):
 		self.assertEqual(self.row(name)["status"], "Cancelled")
 		self.assertEqual(self.adapter.named("status"), ["pending", "cancelled"])
 
+	def test_credit_cap_closes_the_check(self):
+		frappe.db.set_single_value("Guard Settings", "monthly_credit_cap", 1)
+		name = self.review([])
+		self.assertEqual(self.row(name)["status"], "Skipped")
+		self.assertEqual(self.adapter.named("status"), ["pending", "skipped"])
+
 	def test_rereview_edits_summary_and_dedupes(self):
 		finding = {
 			"path": "app/models.py",
