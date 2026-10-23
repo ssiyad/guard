@@ -109,8 +109,13 @@ class TestPipeline(PullRequestCase):
 		self.assertEqual(self.adapter.named("status"), ["pending", "cancelled"])
 
 	def test_credit_cap_closes_the_check(self):
+		cap = frappe.db.get_single_value("Guard Settings", "monthly_credit_cap")
 		frappe.db.set_single_value("Guard Settings", "monthly_credit_cap", 1)
-		name = self.review([])
+		try:
+			name = self.review([])
+		finally:
+			# Later tests in this class would hit the cap.
+			frappe.db.set_single_value("Guard Settings", "monthly_credit_cap", cap)
 		self.assertEqual(self.row(name)["status"], "Skipped")
 		self.assertEqual(self.adapter.named("status"), ["pending", "skipped"])
 
