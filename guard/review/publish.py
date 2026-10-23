@@ -169,6 +169,10 @@ class Publisher:
 			return sum(1 for f in self.run.findings if f.kept)
 		return open_finding_count(str(self.run.review.pull_request))
 
+	def cancel(self) -> None:
+		if self._shows_check():
+			self._status("cancelled", "Guard stopped this review before it finished")
+
 	def skip(self, reason: str) -> None:
 		if self._shows_check():
 			report_skip(self.gh, self.repo, self.run.head_sha, reason, self._url())

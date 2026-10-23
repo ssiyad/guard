@@ -213,7 +213,7 @@ class ProviderAdapter:
 		raise NotImplementedError
 
 	def set_status(self, repo: str, sha: str, state: str, description: str, url: str = "") -> None:
-		"""`state` is pending, success, failure, error or skipped."""
+		"""`state` is pending, success, failure, error, skipped or cancelled."""
 		raise NotImplementedError
 
 	def add_reaction(self, repo: str, number: int, target: str, target_id: str, content: str) -> str | None:

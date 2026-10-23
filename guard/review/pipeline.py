@@ -46,6 +46,7 @@ class ReviewPipeline:
 	def __init__(self, review: str):
 		self.review = cast("CodeReview", frappe.get_doc("Code Review", review))
 		self.started = time.time()
+		self.publisher: Publisher | None = None  # set once the Guard check shows the review
 
 	@classmethod
 	def run(cls, review: str, attempt: int = 0) -> None:
@@ -71,6 +72,7 @@ class ReviewPipeline:
 			self.execute()
 		except Cancelled:
 			self.review.db_set({"status": "Cancelled", "completed_at": now_datetime()})
+			self.close_check()
 		except GatewayBusy as busy:
 			self.retry(attempt, busy.retry_after, "the AI gateway", f"AI gateway busy: {busy}")
 		except IndexBusy:
@@ -102,6 +104,7 @@ class ReviewPipeline:
 		publisher = Publisher(run)
 		self.stage("start")
 		publisher.start()
+		self.publisher = publisher
 		self.stage("index")
 		index = ensure_fresh(run.repository) if run.repository else None
 		run.graph = CodeGraph(index) if index else None
@@ -387,6 +390,20 @@ class ReviewPipeline:
 		self.check_cancel()
 		self.review.db_set("stage", name, update_modified=False)
 		db.commit()
+
+	def close_check(self) -> None:
+		"""Stop the Guard check showing this review, unless a newer review of the same commit owns it."""
+		newer = frappe.db.exists(
+			"Code Review",
+			{
+				"pull_request": self.review.pull_request,
+				"head_sha": self.review.head_sha,
+				"status": ["in", ["Queued", "Running"]],
+				"name": ["!=", self.review.name],
+			},
+		)
+		if self.publisher and not newer:
+			self.publisher.cancel()
 
 	def check_cancel(self) -> None:
 		if db.value("Code Review", str(self.review.name), "cancel_requested"):
