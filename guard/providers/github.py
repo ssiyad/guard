@@ -251,9 +251,9 @@ class GitHubAdapter(ProviderAdapter):
 		if self.doc.get("auth_mode") == "App":
 			self._check_run(repo, sha, state, description, url)
 			return
-		# A commit status has no skipped state.
+		# A commit status has no skipped or cancelled state.
 		payload = {
-			"state": "success" if state == "skipped" else state,
+			"state": {"skipped": "success", "cancelled": "error"}.get(state, state),
 			"description": description[:140],
 			"context": "Guard",
 		}
@@ -280,6 +280,7 @@ class GitHubAdapter(ProviderAdapter):
 				"failure": "failure",
 				"error": "neutral",
 				"skipped": "skipped",
+				"cancelled": "cancelled",
 			}.get(state, "neutral")
 		if run_id:
 			self.request("PATCH", f"/repos/{repo}/check-runs/{run_id}", json=payload)

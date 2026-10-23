@@ -3,7 +3,7 @@ from unittest.mock import PropertyMock, patch
 import frappe
 
 from guard.llm.client import LLMClient, use_responder
-from guard.providers.base import ProviderComment
+from guard.providers.base import ProviderComment, ProviderError
 from guard.review import trigger
 from guard.tests.cases import AUTO_APPROVE, PullRequestCase
 from guard.tests.fakes import scripted
@@ -98,6 +98,35 @@ class TestPipeline(PullRequestCase):
 		self.assertEqual(db.value("Code Review", str(dead.name), "status"), "Failed")
 		self.assertEqual(self.adapter.named("status"), ["error"])
 		self.assertIn("confused", self.adapter.named("react"))
+
+	def test_cancelled_review_closes_the_check(self):
+		def cancel(repository):
+			frappe.db.set_value("Code Review", {"pull_request": self.pr}, "cancel_requested", 1)
+
+		with patch("guard.review.pipeline.ensure_fresh", side_effect=cancel):
+			name = self.review([])
+		self.assertEqual(self.row(name)["status"], "Cancelled")
+		self.assertEqual(self.adapter.named("status"), ["pending", "cancelled"])
+
+	def test_credit_cap_closes_the_check(self):
+		cap = frappe.db.get_single_value("Guard Settings", "monthly_credit_cap")
+		frappe.db.set_single_value("Guard Settings", "monthly_credit_cap", 1)
+		try:
+			name = self.review([])
+		finally:
+			# Later tests in this class would hit the cap.
+			frappe.db.set_single_value("Guard Settings", "monthly_credit_cap", cap)
+		self.assertEqual(self.row(name)["status"], "Skipped")
+		self.assertEqual(self.adapter.named("status"), ["pending", "skipped"])
+
+	def test_failed_review_closes_the_check_when_the_reaction_fails(self):
+		with (
+			patch("guard.review.pipeline.ensure_fresh", side_effect=RuntimeError("index broke")),
+			patch.object(self.adapter, "add_reaction", side_effect=ProviderError("no reactions")),
+			self.assertRaises(RuntimeError),
+		):
+			self.review([])
+		self.assertEqual(self.adapter.named("status"), ["pending", "error"])
 
 	def test_rereview_edits_summary_and_dedupes(self):
 		finding = {

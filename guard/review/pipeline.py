@@ -24,7 +24,7 @@ from guard.providers import adapter_for_repository
 from guard.review import checks, context, crossrepo, prompts, rule_files, sandbox, stale, verify
 from guard.review.agent import Agent
 from guard.review.findings import FindingFilter, score_cap, score_floor
-from guard.review.publish import Publisher
+from guard.review.publish import Publisher, set_status
 from guard.review.run import ReviewRun, Verdict
 from guard.review.task import compose
 from guard.utils import db
@@ -46,6 +46,7 @@ class ReviewPipeline:
 	def __init__(self, review: str):
 		self.review = cast("CodeReview", frappe.get_doc("Code Review", review))
 		self.started = time.time()
+		self.publisher: Publisher | None = None  # set once the Guard check shows the review
 
 	@classmethod
 	def run(cls, review: str, attempt: int = 0) -> None:
@@ -71,6 +72,7 @@ class ReviewPipeline:
 			self.execute()
 		except Cancelled:
 			self.review.db_set({"status": "Cancelled", "completed_at": now_datetime()})
+			self.close_check()
 		except GatewayBusy as busy:
 			self.retry(attempt, busy.retry_after, "the AI gateway", f"AI gateway busy: {busy}")
 		except IndexBusy:
@@ -102,6 +104,7 @@ class ReviewPipeline:
 		publisher = Publisher(run)
 		self.stage("start")
 		publisher.start()
+		self.publisher = publisher
 		self.stage("index")
 		index = ensure_fresh(run.repository) if run.repository else None
 		run.graph = CodeGraph(index) if index else None
@@ -115,6 +118,7 @@ class ReviewPipeline:
 			run.rule_files = rule_files.collect(run.paths, run.head, run.list_dir)
 		self.pick_tier(run)
 		if not self.credits_allow(run):
+			publisher.skip("the monthly credit cap is reached")
 			return
 		linked = (
 			tickets.for_pull_request(run.title, run.description, run.head_branch)
@@ -388,6 +392,20 @@ class ReviewPipeline:
 		self.review.db_set("stage", name, update_modified=False)
 		db.commit()
 
+	def close_check(self) -> None:
+		"""Stop the Guard check showing this review, unless a newer review of the same commit owns it."""
+		newer = frappe.db.exists(
+			"Code Review",
+			{
+				"pull_request": self.review.pull_request,
+				"head_sha": self.review.head_sha,
+				"status": ["in", ["Queued", "Running"]],
+				"name": ["!=", self.review.name],
+			},
+		)
+		if self.publisher and not newer:
+			self.publisher.cancel()
+
 	def check_cancel(self) -> None:
 		if db.value("Code Review", str(self.review.name), "cancel_requested"):
 			raise Cancelled
@@ -436,9 +454,10 @@ class ReviewPipeline:
 		if not adapter:
 			return
 		full_name = str(db.value("Code Repository", str(pr.repository), "full_name"))
-		adapter.add_reaction(full_name, int(pr.number), "pr", "", "confused")
+		# The status first: a failed reaction must not leave the check in progress.
 		if self.review.head_sha:
-			adapter.set_status(full_name, self.review.head_sha, "error", "Guard could not finish the review")
+			set_status(adapter, full_name, self.review.head_sha, "error", "Guard could not finish the review")
+		adapter.add_reaction(full_name, int(pr.number), "pr", "", "confused")
 
 
 def graph_verdict(run: ReviewRun) -> Verdict:
