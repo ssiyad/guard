@@ -118,6 +118,7 @@ class ReviewPipeline:
 			run.rule_files = rule_files.collect(run.paths, run.head, run.list_dir)
 		self.pick_tier(run)
 		if not self.credits_allow(run):
+			publisher.skip("the monthly credit cap is reached")
 			return
 		linked = (
 			tickets.for_pull_request(run.title, run.description, run.head_branch)
